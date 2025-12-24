@@ -10,12 +10,7 @@ import {
     orderBy,
     onSnapshot
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
-import {
-    ref,
-    uploadBytes,
-    getDownloadURL,
-    deleteObject
-} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
+// Storage imports removed as we use Base64 now
 
 // Convert Image to Base64 String
 function convertImageToBase64(file) {
@@ -236,29 +231,7 @@ async function validateAndCompressImage(file) {
     }
 }
 
-// Upload Image to Firebase Storage
-async function uploadImageToStorage(file, itemId) {
-    try {
-        // Validate and compress the image first
-        const compressedFile = await validateAndCompressImage(file);
-
-        const storageRef = ref(storage, `lost-and-found-images/${itemId}/${file.name}`);
-        const snapshot = await uploadBytes(storageRef, compressedFile);
-        const downloadURL = await getDownloadURL(snapshot.ref);
-        return downloadURL;
-    } catch (error) {
-        console.error("Error uploading image:", error);
-        throw error;
-    }
-}
-
-// Delete Image from Firebase Storage (Deprecated - Images stored in Firestore now)
-async function deleteImageFromStorage(imageUrl) {
-    // No independent storage to delete from. 
-    // Image data is deleted automatically when the Firestore document is deleted.
-    console.log("Skipping storage delete (using Base64 storage)");
-    return;
-}
+// (Old storage functions removed)
 
 // Populate Gallery
 const galleryGrid = document.querySelector('.gallery-grid');
