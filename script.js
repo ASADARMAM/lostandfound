@@ -1,5 +1,5 @@
 // Import Firebase services
-import { db, storage, auth } from './firebase-config.js';
+import { db, auth } from './firebase-config.js';
 import {
     collection,
     addDoc,
@@ -16,6 +16,38 @@ import {
     getDownloadURL,
     deleteObject
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
+
+// Convert Image to Base64 String
+function convertImageToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+        reader.readAsDataURL(file);
+    });
+}
+
+// Upload Image (Now just returns Base64 string for Firestore)
+async function uploadImageToStorage(file, itemId) {
+    try {
+        // Validate and compress the image first
+        // Note: strict 0.5MB limit is crucial for Firestore 1MB doc limit
+        const compressedFile = await validateAndCompressImage(file);
+
+        // Convert to Base64
+        const base64String = await convertImageToBase64(compressedFile);
+        return base64String;
+    } catch (error) {
+        console.error("Error processing image:", error);
+        throw error;
+    }
+}
+
+// Delete Image (No-op since image is part of the document)
+async function deleteImageFromStorage(imageUrl) {
+    // No storage bucket to delete from
+    return;
+}
 import {
     signInWithEmailAndPassword,
     signOut,
@@ -220,19 +252,12 @@ async function uploadImageToStorage(file, itemId) {
     }
 }
 
-// Delete Image from Firebase Storage
+// Delete Image from Firebase Storage (Deprecated - Images stored in Firestore now)
 async function deleteImageFromStorage(imageUrl) {
-    try {
-        // Only delete if it's a Firebase Storage URL
-        if (imageUrl && imageUrl.includes('firebasestorage.googleapis.com')) {
-            const imageRef = ref(storage, imageUrl);
-            await deleteObject(imageRef);
-            console.log("Image deleted from storage");
-        }
-    } catch (error) {
-        console.error("Error deleting image from storage:", error);
-        // Don't throw error, just log it - we still want to delete the Firestore document
-    }
+    // No independent storage to delete from. 
+    // Image data is deleted automatically when the Firestore document is deleted.
+    console.log("Skipping storage delete (using Base64 storage)");
+    return;
 }
 
 // Populate Gallery
@@ -369,7 +394,7 @@ if (reportForm) {
 
             if (imageInput.files && imageInput.files[0]) {
                 try {
-                    submitButton.textContent = 'Compressing image...';
+                    submitButton.textContent = 'Encoding image...';
                     image = await uploadImageToStorage(imageInput.files[0], tempId);
                 } catch (err) {
                     console.error("Error uploading image:", err);
