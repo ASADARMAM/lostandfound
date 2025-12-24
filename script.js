@@ -1,0 +1,367 @@
+// Import Firebase services
+import { db, storage } from './firebase-config.js';
+import {
+    collection,
+    addDoc,
+    getDocs,
+    deleteDoc,
+    doc,
+    query,
+    orderBy,
+    onSnapshot
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import {
+    ref,
+    uploadBytes,
+    getDownloadURL,
+    deleteObject
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
+
+const COLLECTION_NAME = 'lostAndFoundItems';
+
+// Initial Seed Data (if Firestore is empty)
+const initialItems = [
+    {
+        type: 'lost',
+        name: 'Blue Hydro Flask',
+        location: 'Library, 2nd Floor',
+        date: '2025-12-16',
+        description: 'Dark blue with a few stickers on it.',
+        contact: '0300-1234567 (Ali)',
+        image: 'https://via.placeholder.com/300/0000FF/808080?text=Hydro+Flask'
+    },
+    {
+        type: 'found',
+        name: 'Scientific Calculator',
+        location: 'Lab 304',
+        date: '2025-12-17',
+        description: 'Casio fx-991EX found on desk 4.',
+        contact: 'Turned into Dept Office',
+        image: 'https://via.placeholder.com/300/000000/FFFFFF?text=Calculator'
+    },
+    {
+        type: 'lost',
+        name: 'Black Hoodie',
+        location: 'Cafeteria',
+        date: '2025-12-15',
+        description: 'Nike hoodie, size L.',
+        contact: 'sarah.student@uni.edu',
+        image: 'https://via.placeholder.com/300/333333/FFFFFF?text=Hoodie'
+    },
+    {
+        type: 'found',
+        name: 'Car Keys',
+        location: 'Parking Lot A',
+        date: '2025-12-17',
+        description: 'Toyota keys with a red keychain.',
+        contact: 'Security Office (Gate 1)',
+        image: 'https://via.placeholder.com/300/CCCCCC/000000?text=Keys'
+    }
+];
+
+let items = [];
+
+// Load Items from Firestore
+async function loadItemsFromFirestore() {
+    try {
+        const itemsCollection = collection(db, COLLECTION_NAME);
+        const q = query(itemsCollection, orderBy('date', 'desc'));
+        const querySnapshot = await getDocs(q);
+
+        items = [];
+        querySnapshot.forEach((doc) => {
+            items.push({
+                id: doc.id,
+                ...doc.data()
+            });
+        });
+
+        // If no items exist, initialize with seed data
+        if (items.length === 0) {
+            await initializeSeedData();
+        }
+
+        return items;
+    } catch (error) {
+        console.error("Error loading items from Firestore:", error);
+        alert("Failed to load items. Please check your internet connection.");
+        return [];
+    }
+}
+
+// Initialize Firestore with seed data
+async function initializeSeedData() {
+    try {
+        const itemsCollection = collection(db, COLLECTION_NAME);
+        for (const item of initialItems) {
+            await addDoc(itemsCollection, item);
+        }
+        console.log("Seed data initialized successfully");
+        // Reload items after initialization
+        await loadItemsFromFirestore();
+    } catch (error) {
+        console.error("Error initializing seed data:", error);
+    }
+}
+
+// Upload Image to Firebase Storage
+async function uploadImageToStorage(file, itemId) {
+    try {
+        const storageRef = ref(storage, `lost-and-found-images/${itemId}/${file.name}`);
+        const snapshot = await uploadBytes(storageRef, file);
+        const downloadURL = await getDownloadURL(snapshot.ref);
+        return downloadURL;
+    } catch (error) {
+        console.error("Error uploading image:", error);
+        throw error;
+    }
+}
+
+// Delete Image from Firebase Storage
+async function deleteImageFromStorage(imageUrl) {
+    try {
+        // Only delete if it's a Firebase Storage URL
+        if (imageUrl && imageUrl.includes('firebasestorage.googleapis.com')) {
+            const imageRef = ref(storage, imageUrl);
+            await deleteObject(imageRef);
+            console.log("Image deleted from storage");
+        }
+    } catch (error) {
+        console.error("Error deleting image from storage:", error);
+        // Don't throw error, just log it - we still want to delete the Firestore document
+    }
+}
+
+// Populate Gallery
+const galleryGrid = document.querySelector('.gallery-grid');
+
+async function renderGallery() {
+    if (!galleryGrid) return;
+
+    galleryGrid.innerHTML = '<p style="text-align: center; color: #666;">Loading items...</p>';
+
+    await loadItemsFromFirestore();
+
+    galleryGrid.innerHTML = ''; // Clear loading message
+
+    if (items.length === 0) {
+        galleryGrid.innerHTML = '<p style="text-align: center; color: #666;">No items found.</p>';
+        return;
+    }
+
+    items.forEach((item) => {
+        const card = document.createElement('div');
+        card.classList.add('item-card');
+
+        card.innerHTML = `
+            <div class="item-content">
+                <span class="item-badge ${item.type}">${item.type.toUpperCase()}</span>
+                <h3 class="item-title">${item.name}</h3>
+                <div class="item-details">
+                    <p><i class="fas fa-map-marker-alt"></i> ${item.location}</p>
+                    <p><i class="far fa-calendar-alt"></i> ${item.date}</p>
+                </div>
+                <p>${item.description}</p>
+            </div>
+        `;
+        galleryGrid.appendChild(card);
+
+        // Modal Event Listener
+        card.addEventListener('click', () => openModal(item));
+    });
+}
+
+// Setup real-time listener for gallery updates
+function setupRealtimeListener() {
+    if (!galleryGrid) return;
+
+    const itemsCollection = collection(db, COLLECTION_NAME);
+    const q = query(itemsCollection, orderBy('date', 'desc'));
+
+    onSnapshot(q, (snapshot) => {
+        items = [];
+        snapshot.forEach((doc) => {
+            items.push({
+                id: doc.id,
+                ...doc.data()
+            });
+        });
+
+        // Re-render gallery
+        galleryGrid.innerHTML = '';
+
+        if (items.length === 0) {
+            galleryGrid.innerHTML = '<p style="text-align: center; color: #666;">No items found.</p>';
+            return;
+        }
+
+        items.forEach((item) => {
+            const card = document.createElement('div');
+            card.classList.add('item-card');
+
+            card.innerHTML = `
+                <div class="item-content">
+                    <span class="item-badge ${item.type}">${item.type.toUpperCase()}</span>
+                    <h3 class="item-title">${item.name}</h3>
+                    <div class="item-details">
+                        <p><i class="fas fa-map-marker-alt"></i> ${item.location}</p>
+                        <p><i class="far fa-calendar-alt"></i> ${item.date}</p>
+                    </div>
+                    <p>${item.description}</p>
+                </div>
+            `;
+            galleryGrid.appendChild(card);
+            card.addEventListener('click', () => openModal(item));
+        });
+    });
+}
+
+// Initial Render
+if (galleryGrid) {
+    renderGallery();
+    setupRealtimeListener();
+}
+
+// Identify Page Type for Form Submission
+const isLostPage = window.location.pathname.includes('report-lost.html');
+const isFoundPage = window.location.pathname.includes('report-found.html');
+const reportForm = document.querySelector('form');
+
+if (reportForm) {
+    reportForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const submitButton = reportForm.querySelector('button[type="submit"]');
+        const originalButtonText = submitButton.textContent;
+        submitButton.disabled = true;
+        submitButton.textContent = 'Submitting...';
+
+        try {
+            const type = isLostPage ? 'lost' : 'found';
+            const name = document.getElementById('itemName').value;
+            const location = document.getElementById('location').value;
+            const date = document.getElementById('date').value;
+            const description = document.getElementById('description').value;
+            const contact = document.getElementById('contact').value;
+
+            let finalContact = contact;
+            if (isFoundPage) {
+                const turnedIn = document.getElementById('turnedIn').value;
+                if (turnedIn) {
+                    const map = {
+                        'security': 'Security Office',
+                        'admin': 'Admin Office',
+                        'library': 'Library Front Desk'
+                    };
+                    finalContact = `${map[turnedIn] || turnedIn} (Reported by: ${contact})`;
+                }
+            }
+
+            // Handle Image
+            const imageInput = document.getElementById('image');
+            let image = `https://via.placeholder.com/300?text=${encodeURIComponent(name)}`;
+
+            // Generate a temporary ID for the item
+            const tempId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+
+            if (imageInput.files && imageInput.files[0]) {
+                try {
+                    submitButton.textContent = 'Uploading image...';
+                    image = await uploadImageToStorage(imageInput.files[0], tempId);
+                } catch (err) {
+                    console.error("Error uploading image:", err);
+                    alert("Failed to upload image. Using default placeholder.");
+                }
+            }
+
+            const newItem = {
+                type,
+                name,
+                location,
+                date,
+                description,
+                contact: finalContact,
+                image
+            };
+
+            submitButton.textContent = 'Saving to database...';
+            const itemsCollection = collection(db, COLLECTION_NAME);
+            await addDoc(itemsCollection, newItem);
+
+            alert('Report Submitted Successfully!');
+            reportForm.reset();
+            window.location.href = 'gallery.html';
+        } catch (error) {
+            console.error("Error submitting report:", error);
+            alert("Failed to submit report. Please try again.");
+            submitButton.disabled = false;
+            submitButton.textContent = originalButtonText;
+        }
+    });
+}
+
+// Delete Item Function (Admin Protected)
+window.deleteItem = async function (id, imageUrl) {
+    const password = prompt("Enter Admin Password to delete this item:");
+    if (password === 'admin123') {
+        try {
+            // Delete image from storage if it exists
+            if (imageUrl) {
+                await deleteImageFromStorage(imageUrl);
+            }
+
+            // Delete document from Firestore
+            await deleteDoc(doc(db, COLLECTION_NAME, id));
+
+            const modal = document.getElementById('itemModal');
+            if (modal) modal.style.display = 'none';
+
+            alert('Item marked as resolved and removed.');
+        } catch (error) {
+            console.error("Error deleting item:", error);
+            alert("Failed to delete item. Please try again.");
+        }
+    } else if (password !== null) {
+        alert('Incorrect Password! Access Denied.');
+    }
+};
+
+// Modal Logic
+const modal = document.getElementById('itemModal');
+const closeBtn = document.querySelector('.close-btn');
+const modalDetails = document.getElementById('modalDetails');
+
+function openModal(item) {
+    if (!modal || !modalDetails) return;
+
+    const deleteButtonHtml = `<button onclick="deleteItem('${item.id}', '${item.image}')" class="btn" style="width: 100%; border: none; cursor: pointer; background-color: #e74c3c; color: white; margin-top: 10px; padding: 10px; border-radius: 5px; font-weight: bold;">Mark as Resolved (Admin Only)</button>`;
+
+    modalDetails.innerHTML = `
+        <div style="text-align: center; margin-bottom: 20px;">
+            <img src="${item.image}" alt="${item.name}" style="max-width: 100%; border-radius: 10px; max-height: 300px; object-fit: contain;">
+        </div>
+        <span class="item-badge ${item.type}">${item.type.toUpperCase()}</span>
+        <h2 style="margin: 15px 0; color: #333;">${item.name}</h2>
+        <div style="margin-bottom: 20px; line-height: 1.8; color: #555;">
+            <p><strong><i class="fas fa-map-marker-alt"></i> Location:</strong> ${item.location}</p>
+            <p><strong><i class="far fa-calendar-alt"></i> Date:</strong> ${item.date}</p>
+            <p><strong><i class="fas fa-user-circle"></i> Contact:</strong> ${item.contact}</p>
+            <p><strong><i class="fas fa-info-circle"></i> Description:</strong><br>${item.description}</p>
+        </div>
+        <button onclick="document.getElementById('itemModal').style.display='none'" class="btn btn-found" style="width: 100%; border: none; cursor: pointer; padding: 10px; border-radius: 5px;">Close Details</button>
+        ${deleteButtonHtml}
+    `;
+    modal.style.display = 'block';
+}
+
+if (modal && closeBtn) {
+    closeBtn.onclick = function () {
+        modal.style.display = "none";
+    }
+
+    window.onclick = function (event) {
+        if (event.target == modal) {
+            modal.style.display = "none";
+        }
+    }
+}

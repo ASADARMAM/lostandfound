@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Item Gallery - Campus Lost & Found</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+
+<body>
+    <nav class="navbar">
+        <div class="logo">
+            <i class="fas fa-university"></i> Campus Lost & Found
+        </div>
+        <ul class="nav-links">
+            <li><a href="index.html">Home</a></li>
+            <li><a href="gallery.html" class="active">Item Gallery</a></li>
+            <li><a href="contact.html">Contact</a></li>
+        </ul>
+    </nav>
+
+    <header class="hero" style="padding: 60px 20px;">
+        <div class="hero-content">
+            <h1>Item Gallery</h1>
+            <p>Browse recently lost and found items on campus.</p>
+        </div>
+    </header>
+
+    <div class="gallery-container">
+        <div class="gallery-grid">
+            <!-- Items will be populated by JS -->
+        </div>
+    </div>
+
+    <!-- Item Details Modal -->
+    <div id="itemModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn">&times;</span>
+            <div id="modalDetails"></div>
+        </div>
+    </div>
+
+    <footer>
+        <p>&copy; 2025 Campus Lost & Found Portal.</p>
+    </footer>
+
+    <script type="module" src="script.js"></script>
+</body>
+
+</html>
