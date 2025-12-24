@@ -1,5 +1,5 @@
 // Import Firebase services
-import { db, storage } from './firebase-config.js';
+import { db, storage, auth } from './firebase-config.js';
 import {
     collection,
     addDoc,
@@ -16,6 +16,11 @@ import {
     getDownloadURL,
     deleteObject
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
+import {
+    signInWithEmailAndPassword,
+    signOut,
+    onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 
 const COLLECTION_NAME = 'lostAndFoundItems';
 
@@ -60,6 +65,65 @@ const initialItems = [
 ];
 
 let items = [];
+let currentUser = null;
+
+// Authentication State Management
+onAuthStateChanged(auth, (user) => {
+    currentUser = user;
+    updateAuthUI();
+});
+
+function updateAuthUI() {
+    const adminStatus = document.getElementById('adminStatus');
+    const adminEmailSpan = document.querySelector('#adminStatus #adminEmail');
+
+    if (currentUser && adminStatus) {
+        adminStatus.style.display = 'flex';
+        if (adminEmailSpan) {
+            adminEmailSpan.textContent = currentUser.email;
+        }
+    } else if (adminStatus) {
+        adminStatus.style.display = 'none';
+    }
+}
+
+// Admin Login Functions
+function showAdminLogin() {
+    const modal = document.getElementById('adminLoginModal');
+    if (modal) {
+        modal.style.display = 'block';
+        document.getElementById('authError').style.display = 'none';
+        document.getElementById('adminEmail').value = '';
+        document.getElementById('adminPassword').value = '';
+    }
+}
+
+async function signInAdmin(email, password) {
+    try {
+        await signInWithEmailAndPassword(auth, email, password);
+        const modal = document.getElementById('adminLoginModal');
+        if (modal) modal.style.display = 'none';
+        return true;
+    } catch (error) {
+        const authError = document.getElementById('authError');
+        if (authError) {
+            authError.textContent = 'Invalid email or password. Please try again.';
+            authError.style.display = 'block';
+        }
+        console.error('Sign in error:', error);
+        return false;
+    }
+}
+
+async function signOutAdmin() {
+    try {
+        await signOut(auth);
+        alert('Signed out successfully');
+    } catch (error) {
+        console.error('Sign out error:', error);
+        alert('Error signing out');
+    }
+}
 
 // Load Items from Firestore
 async function loadItemsFromFirestore() {
@@ -104,11 +168,50 @@ async function initializeSeedData() {
     }
 }
 
+// Validate and Compress Image before Upload
+async function validateAndCompressImage(file) {
+    // File type validation
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+        throw new Error('Invalid file type. Please upload JPEG, PNG, or WebP images only.');
+    }
+
+    // File size validation (5MB max for original file)
+    const maxSizeMB = 5;
+    const maxSizeBytes = maxSizeMB * 1024 * 1024;
+    if (file.size > maxSizeBytes) {
+        throw new Error(`File size exceeds ${maxSizeMB}MB. Please choose a smaller image.`);
+    }
+
+    // Compression options
+    const options = {
+        maxSizeMB: 0.5, // Target compressed size: 500KB
+        maxWidthOrHeight: 1920, // Max dimension: 1920px
+        useWebWorker: true,
+        fileType: file.type === 'image/png' ? 'image/png' : 'image/jpeg', // Preserve PNG transparency
+        initialQuality: 0.8 // Good quality with compression
+    };
+
+    try {
+        console.log(`Original file size: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
+        const compressedFile = await imageCompression(file, options);
+        console.log(`Compressed file size: ${(compressedFile.size / 1024 / 1024).toFixed(2)}MB`);
+        console.log(`Compression ratio: ${((1 - compressedFile.size / file.size) * 100).toFixed(1)}%`);
+        return compressedFile;
+    } catch (error) {
+        console.error('Compression error:', error);
+        throw new Error('Failed to compress image. Please try a different image.');
+    }
+}
+
 // Upload Image to Firebase Storage
 async function uploadImageToStorage(file, itemId) {
     try {
+        // Validate and compress the image first
+        const compressedFile = await validateAndCompressImage(file);
+
         const storageRef = ref(storage, `lost-and-found-images/${itemId}/${file.name}`);
-        const snapshot = await uploadBytes(storageRef, file);
+        const snapshot = await uploadBytes(storageRef, compressedFile);
         const downloadURL = await getDownloadURL(snapshot.ref);
         return downloadURL;
     } catch (error) {
@@ -266,11 +369,18 @@ if (reportForm) {
 
             if (imageInput.files && imageInput.files[0]) {
                 try {
-                    submitButton.textContent = 'Uploading image...';
+                    submitButton.textContent = 'Compressing image...';
                     image = await uploadImageToStorage(imageInput.files[0], tempId);
                 } catch (err) {
                     console.error("Error uploading image:", err);
-                    alert("Failed to upload image. Using default placeholder.");
+                    // Show specific error message to user
+                    alert(err.message || "Failed to upload image. Using default placeholder.");
+                    // Reset button state and stop submission if it's a validation error
+                    if (err.message && (err.message.includes('Invalid file type') || err.message.includes('exceeds'))) {
+                        submitButton.disabled = false;
+                        submitButton.textContent = originalButtonText;
+                        return; // Stop form submission
+                    }
                 }
             }
 
@@ -300,29 +410,36 @@ if (reportForm) {
     });
 }
 
-// Delete Item Function (Admin Protected)
+// Delete Item Function (Admin Protected with Firebase Auth)
 window.deleteItem = async function (id, imageUrl) {
-    const password = prompt("Enter Admin Password to delete this item:");
-    if (password === 'admin123') {
-        try {
-            // Delete image from storage if it exists
-            if (imageUrl) {
-                await deleteImageFromStorage(imageUrl);
-            }
+    // Check if user is authenticated
+    if (!currentUser) {
+        showAdminLogin();
+        // Store the delete action to execute after login
+        window.pendingDelete = { id, imageUrl };
+        return;
+    }
 
-            // Delete document from Firestore
-            await deleteDoc(doc(db, COLLECTION_NAME, id));
+    try {
+        // Delete image from storage if it exists
+        if (imageUrl) {
+            await deleteImageFromStorage(imageUrl);
+        }
 
-            const modal = document.getElementById('itemModal');
-            if (modal) modal.style.display = 'none';
+        // Delete document from Firestore
+        await deleteDoc(doc(db, COLLECTION_NAME, id));
 
-            alert('Item marked as resolved and removed.');
-        } catch (error) {
-            console.error("Error deleting item:", error);
+        const modal = document.getElementById('itemModal');
+        if (modal) modal.style.display = 'none';
+
+        alert('Item marked as resolved and removed.');
+    } catch (error) {
+        console.error("Error deleting item:", error);
+        if (error.code === 'permission-denied') {
+            alert("Permission denied. Please make sure you're signed in as an admin.");
+        } else {
             alert("Failed to delete item. Please try again.");
         }
-    } else if (password !== null) {
-        alert('Incorrect Password! Access Denied.');
     }
 };
 
@@ -365,3 +482,57 @@ if (modal && closeBtn) {
         }
     }
 }
+
+// Admin Login Modal Event Listeners
+const adminLoginModal = document.getElementById('adminLoginModal');
+const closeAdminBtn = document.querySelector('.close-admin-btn');
+const signInBtn = document.getElementById('signInBtn');
+const signOutBtn = document.getElementById('signOutBtn');
+
+if (closeAdminBtn) {
+    closeAdminBtn.onclick = function () {
+        if (adminLoginModal) adminLoginModal.style.display = 'none';
+    }
+}
+
+if (signInBtn) {
+    signInBtn.onclick = async function () {
+        const email = document.getElementById('adminEmail').value;
+        const password = document.getElementById('adminPassword').value;
+
+        if (!email || !password) {
+            const authError = document.getElementById('authError');
+            if (authError) {
+                authError.textContent = 'Please enter both email and password.';
+                authError.style.display = 'block';
+            }
+            return;
+        }
+
+        signInBtn.disabled = true;
+        signInBtn.textContent = 'Signing in...';
+
+        const success = await signInAdmin(email, password);
+
+        signInBtn.disabled = false;
+        signInBtn.textContent = 'Sign In';
+
+        // If there's a pending delete action, execute it
+        if (success && window.pendingDelete) {
+            const { id, imageUrl } = window.pendingDelete;
+            window.pendingDelete = null;
+            await window.deleteItem(id, imageUrl);
+        }
+    }
+}
+
+if (signOutBtn) {
+    signOutBtn.onclick = signOutAdmin;
+}
+
+// Close admin login modal when clicking outside
+window.addEventListener('click', function (event) {
+    if (event.target == adminLoginModal) {
+        adminLoginModal.style.display = 'none';
+    }
+});
